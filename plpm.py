@@ -1,8 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import heapq
 import streamlit as st
 
-# --- Model ---
+# -------------------------------
+# 1. Demand Growth Model
+# -------------------------------
 def simulate_growth(P0, K, r, alpha, T, dt=0.1):
     time_steps = int(T / dt)
     P = np.zeros(time_steps)
@@ -17,59 +20,123 @@ def simulate_growth(P0, K, r, alpha, T, dt=0.1):
     return t, P
 
 
-# --- UI ---
-st.title("📈 Product Launch Popularity Simulator")
-st.markdown("Logistic Growth + Network Effects Model")
+# -------------------------------
+# 2. Dijkstra Algorithm
+# -------------------------------
+def dijkstra_with_path(graph, start):
+    pq = [(0, start)]
+    distances = {node: float('inf') for node in graph}
+    previous = {node: None for node in graph}
 
-# Sidebar inputs
-st.sidebar.header("Scenario Parameters")
+    distances[start] = 0
 
-P0 = st.sidebar.number_input("Initial Users (P0)", value=10)
-K = st.sidebar.number_input("Market Capacity (K)", value=10000)
+    while pq:
+        current_distance, current_node = heapq.heappop(pq)
+
+        for neighbor, weight in graph[current_node].items():
+            distance = current_distance + weight
+
+            if distance < distances[neighbor]:
+                distances[neighbor] = distance
+                previous[neighbor] = current_node
+                heapq.heappush(pq, (distance, neighbor))
+
+    return distances, previous
+
+
+def get_path(previous, target):
+    path = []
+    while target:
+        path.append(target)
+        target = previous[target]
+    return path[::-1]
+
+
+# -------------------------------
+# 3. UI
+# -------------------------------
+st.title("🚚 Logistics + Demand Growth Simulator")
+
+st.sidebar.header("📊 Demand Parameters")
+
+P0 = st.sidebar.number_input("Initial Users", value=10)
+K = st.sidebar.number_input("Market Capacity", value=10000)
 r = st.sidebar.slider("Growth Rate (r)", 0.01, 1.0, 0.3)
-alpha = st.sidebar.slider("Network Effect (alpha)", 0.0, 2.0, 0.5)
+alpha1 = st.sidebar.slider("Network Effect - Scenario 1", 0.0, 2.0, 0.3)
+alpha2 = st.sidebar.slider("Network Effect - Scenario 2", 0.0, 2.0, 1.2)
 T = st.sidebar.slider("Time Horizon", 10, 100, 50)
 
-# --- Simulation ---
-t, P = simulate_growth(P0, K, r, alpha, T)
 
-# --- Metrics ---
-st.subheader("📊 Results")
+# -------------------------------
+# 4. Graphs
+# -------------------------------
+graph1 = {
+    'Warehouse': {'A': 10, 'B': 15},
+    'A': {'C': 12, 'D': 15},
+    'B': {'D': 10},
+    'C': {'Hub1': 5},
+    'D': {'Hub2': 10},
+    'Hub1': {},
+    'Hub2': {}
+}
+
+graph2 = {
+    'Warehouse': {'A': 10, 'B': 15},
+    'A': {'C': 12, 'D': 15},
+    'B': {'D': 10},
+    'C': {'Hub1': 5},
+    'D': {'Hub2': 10},
+    'Hub1': {'Hub2': 3},  # shortcut
+    'Hub2': {}
+}
+
+
+# -------------------------------
+# 5. Run Simulation
+# -------------------------------
+t1, demand1 = simulate_growth(P0, K, r, alpha1, T)
+t2, demand2 = simulate_growth(P0, K, r, alpha2, T)
+
+dist1, prev1 = dijkstra_with_path(graph1, 'Warehouse')
+dist2, prev2 = dijkstra_with_path(graph2, 'Warehouse')
+
+
+# -------------------------------
+# 6. Display Results
+# -------------------------------
+st.subheader("📈 Demand Results")
+
 col1, col2 = st.columns(2)
+col1.metric("Final Demand (Scenario 1)", f"{demand1[-1]:.0f}")
+col2.metric("Final Demand (Scenario 2)", f"{demand2[-1]:.0f}")
 
-col1.metric("Final Popularity", f"{P[-1]:.0f}")
-col2.metric("Peak Popularity", f"{np.max(P):.0f}")
 
-# --- Plot ---
+# -------------------------------
+# 7. Plot Growth
+# -------------------------------
 fig, ax = plt.subplots(figsize=(8, 5))
-ax.plot(t, P, label="Popularity Growth")
+ax.plot(t1, demand1, label="Scenario 1 (Normal)")
+ax.plot(t2, demand2, label="Scenario 2 (Improved Network)")
+
 ax.set_xlabel("Time")
 ax.set_ylabel("Users")
-ax.set_title("Growth Curve")
+ax.set_title("Demand Growth Comparison")
 ax.legend()
 ax.grid(True)
 
 st.pyplot(fig)
 
-# --- Scenario Comparison ---
-st.subheader("🔁 Compare with Another Scenario")
 
-with st.expander("Add Comparison Scenario"):
-    P0_2 = st.number_input("Initial Users (Scenario 2)", value=10, key="p02")
-    K_2 = st.number_input("Market Capacity (Scenario 2)", value=10000, key="k2")
-    r_2 = st.slider("Growth Rate (Scenario 2)", 0.01, 1.0, 0.3, key="r2")
-    alpha_2 = st.slider("Network Effect (Scenario 2)", 0.0, 2.0, 1.2, key="a2")
+# -------------------------------
+# 8. Route Results
+# -------------------------------
+st.subheader("🚚 Route Optimization")
 
-    if st.button("Run Comparison"):
-        t2, P2 = simulate_growth(P0_2, K_2, r_2, alpha_2, T)
-
-        fig2, ax2 = plt.subplots(figsize=(8, 5))
-        ax2.plot(t, P, label="Scenario 1")
-        ax2.plot(t2, P2, label="Scenario 2")
-        ax2.set_xlabel("Time")
-        ax2.set_ylabel("Users")
-        ax2.set_title("Scenario Comparison")
-        ax2.legend()
-        ax2.grid(True)
-
-        st.pyplot(fig2)
+for scenario_name, dist, prev in [
+    ("Scenario 1", dist1, prev1),
+    ("Scenario 2", dist2, prev2)
+]:
+    st.markdown(f"### {scenario_name}")
+    for hub in ['Hub1', 'Hub2']:
+        path = get_path(prev, hub)
+        st.write(f"{hub}: Distance = {dist[hub]}, Path = {path}")
